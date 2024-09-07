@@ -7,9 +7,29 @@
 #include <string.h>
 #include <time.h>
 
-#define TABLE_SIZE (1<<19)
+#define TABLE_SIZE (1<<12)
 
-size_t djb2_hash(const char* pStr){
+struct brc{
+    const char* pCity;
+    double min, max, sum;
+    int count;
+};
+
+struct brc* db[TABLE_SIZE] = {0};
+
+size_t djb2_hash(char* pStr, unsigned int* pLen){
+    size_t hash_value = 5381;
+    char c;
+    *pLen = 0;
+    while((c = *pStr++) != ';'){
+        *pLen = *pLen + 1;
+        hash_value = ((hash_value << 5) + hash_value) + c;
+    }
+    *(pStr-1) = '\0';
+    return hash_value % TABLE_SIZE;
+}
+
+size_t djb2_hash_add(const char* pStr){
     size_t hash_value = 5381;
     char c;
     while((c = *pStr++)){
@@ -18,39 +38,21 @@ size_t djb2_hash(const char* pStr){
     return hash_value % TABLE_SIZE;
 }
 
-struct brc{
-    const char* pCity;
-    double min;
-    double max;
-    double sum;
-    int count;
-};
-
-struct brc* db[TABLE_SIZE] = {0};
-
 void hash_map_add(struct brc* entry){
-    size_t hash = djb2_hash(entry->pCity);
-    if(db[hash]){
-        printf("hash_map_add collision at %llu", hash);
-        exit(EXIT_FAILURE);
+    size_t hash = djb2_hash_add(entry->pCity);
+    while(db[hash]){
+        hash = (hash+1) % TABLE_SIZE;
     }
     db[hash] = entry;
 }
-/*
-void hash_map_update(const char* pCity, struct brc* entry){
-    size_t hash = djb2_hash(pCity);
-    if(db[hash]){
-        db[hash] = entry;
-    }else{
-        printf("hash_map_update  cant update at %llu", hash);
-        exit(EXIT_FAILURE);
-    }
-}
-*/
-struct brc* hash_map_get(const char* pCity){
+
+struct brc* hash_map_get(const char* pCity, unsigned int* pLen){
     //Return pointer or NULL
-    size_t hash = djb2_hash(pCity);
-    if(db[hash] && !strcmp(db[hash]->pCity, pCity)){
+    size_t hash = djb2_hash((char*)pCity, pLen);
+    while(db[hash] && strcmp(db[hash]->pCity, pCity)){
+        hash = (hash+1) % TABLE_SIZE;
+    }
+    if(db[hash]){
         return db[hash];
     }else{
         return NULL;
@@ -62,7 +64,7 @@ void print_brc(struct brc* entry){
         printf("'%s' min:%.2f, max:%.2f, avg:%.2f, sum:%.1f, count:%u\n", 
                 entry->pCity, entry->min, entry->max, entry->sum/entry->count,entry->sum, entry->count);
     }else{
-        printf("print_brc  null ptr");
+        fprintf(stderr, "print_brc  null ptr");
         exit(EXIT_FAILURE);
     }
 }
@@ -80,7 +82,7 @@ void hash_map_dump(){
 
 double parser(const char* pStr){
     if(!pStr){
-        printf("parser error");
+        fprintf(stderr, "parser error");
         exit(EXIT_FAILURE);
     }
     double r = 1.0F;
@@ -101,7 +103,7 @@ int main(int argc, char const *argv[])
     //FILE *file = fopen("R:\\100M.txt", "r");
     FILE *file = fopen("C:\\Users\\Kuba\\Documents\\Py\\1brc\\100M.txt", "r");
     if (!file){
-        printf("File error");
+        fprintf(stderr, "File error");
         return EXIT_FAILURE;
     }
     clock_t start = clock();
@@ -114,18 +116,20 @@ int main(int argc, char const *argv[])
         ++line_count;
         if(line_count%10000000==0) printf("%u\n", line_count/10000000);
         
-        char *pos = strchr(line, ';');
-        *pos = '\0';
-        //double measurement = strtod(pos + 1, NULL);
-        double measurement = parser(pos + 1);
+        unsigned int len;
+        //char *pos = strchr(line, ';');
+        //*pos = '\0';
+        //double measurement = parser(pos + 1);
 
         struct brc *pBrc;
-        if((pBrc = hash_map_get((const char *)&line))){
+        if((pBrc = hash_map_get((const char *)&line, &len))){
+            double measurement = parser((const char*)&line[len+1]);
             pBrc->count++;
             pBrc->max = measurement>pBrc->max ? measurement : pBrc->max;
             pBrc->min = measurement<pBrc->min ? measurement : pBrc->min;
             pBrc->sum += measurement;
         }else{
+            double measurement = parser((const char*)&line[len+1]);
             pBrcT[BrcTI].count=1;
             pBrcT[BrcTI].max = measurement;
             pBrcT[BrcTI].min = measurement;
@@ -135,7 +139,6 @@ int main(int argc, char const *argv[])
             BrcTI++;
         }
         if (BrcTI >= 500) {
-            //feat of chatgpt
             fprintf(stderr, "Error: pBrcT array is full.\n");
             break;
         }
