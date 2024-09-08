@@ -1,11 +1,18 @@
 /*  gcc main.c -o main.exe ; & 'c:\Users\Kuba\Documents\GitHub\1brc in C\main.exe'
-
+    3.18s best on linux using fgets()
+    2.71s best on crude mmap() on linux
+    2.54s best on custom copy() instead mecpy/memset
+    25.99s best for 1G
 */
 
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
 #include <time.h>
+#include <fcntl.h>
+#include <sys/mman.h>
+#include <sys/stat.h>
+#include <unistd.h>
 
 #define TABLE_SIZE (1<<12)
 
@@ -81,10 +88,11 @@ void hash_map_dump(){
 }
 
 double parser(const char* pStr){
+    /*
     if(!pStr){
         fprintf(stderr, "parser error");
         exit(EXIT_FAILURE);
-    }
+    }*/
     double r = 1.0F;
     if(*pStr == '-'){
         r = -1.0F;
@@ -97,30 +105,50 @@ double parser(const char* pStr){
     }
 }
 
+void copy(char* dest, const char* src, size_t len){
+    size_t i = 0;
+    for(; i < len; i++){
+        dest[i] = src[i];
+    }
+    dest[i] = '\0';
+}
+
 int main(int argc, char const *argv[])
 {
     printf("---START---\n");
-    //FILE *file = fopen("R:\\100M.txt", "r");
-    FILE *file = fopen("C:\\Users\\Kuba\\Documents\\Py\\1brc\\100M.txt", "r");
-    if (!file){
-        fprintf(stderr, "File error");
+    int fd = open("1G.txt", O_RDONLY, S_IRUSR | S_IWUSR);
+    struct stat sb;
+    if (fstat(fd, &sb) == -1){
+        fprintf(stderr, "File error\n");
         return EXIT_FAILURE;
     }
+    char* nmap_file = mmap(NULL, sb.st_size, PROT_READ, MAP_PRIVATE, fd, 0);
+    
+    size_t counter2 = 0;
+
     clock_t start = clock();
     struct brc pBrcT[500];
     int BrcTI = 1;
-    char line[64] = {0};
+    char line[50] = {0};
     unsigned int line_count = 0;
+    size_t iL = 0;
+    while (iL < sb.st_size){
+        for ( ;iL < sb.st_size; iL++){
+            if (nmap_file[iL] == '\n'){
+                iL++;
+                break;
+            }
+        }
+        //memset(&line, 0, 50);
+        //memcpy(&line, &nmap_file[counter2], iL - counter2);
+        copy((char*)&line, &nmap_file[counter2], iL - counter2);
+        line[iL  - counter2 - 1U] = '\0';
+        counter2 = iL ;
 
-    while (fgets(line, 64, file)){
-        ++line_count;
-        if(line_count%10000000==0) printf("%u\n", line_count/10000000);
+        //++line_count;
+        //if(line_count%10000000==0) printf("%u\n", line_count/10000000);
         
         unsigned int len;
-        //char *pos = strchr(line, ';');
-        //*pos = '\0';
-        //double measurement = parser(pos + 1);
-
         struct brc *pBrc;
         if((pBrc = hash_map_get((const char *)&line, &len))){
             double measurement = parser((const char*)&line[len+1]);
@@ -146,8 +174,7 @@ int main(int argc, char const *argv[])
     hash_map_dump();
     clock_t end = clock();
     double time_spent = (double)(end - start) / CLOCKS_PER_SEC;
-    printf("Time taken: %f seconds\n-------End program--------", time_spent);
+    printf("Time taken: %f seconds\n-------End program--------\n", time_spent);
 
-    fclose(file);
     return 0;
 }
